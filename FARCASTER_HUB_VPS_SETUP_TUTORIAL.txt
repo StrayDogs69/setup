@@ -1,0 +1,459 @@
+================================================================================
+                    TUTORIAL LENGKAP SETUP FARCASTER HUB DI VPS
+================================================================================
+
+🚀 OVERVIEW:
+Setup Farcaster Hub sendiri di VPS untuk full control, no rate limits, 
+dan independence dari third-party services seperti Pinata/Neynar.
+
+================================================================================
+📋 REQUIREMENTS VPS:
+================================================================================
+
+MINIMUM SPECS:
+- CPU: 4 cores
+- RAM: 8GB 
+- Storage: 500GB SSD (akan terus bertambah)
+- Bandwidth: Unlimited (sync butuh banyak data)
+- OS: Ubuntu 22.04 LTS
+
+RECOMMENDED SPECS:
+- CPU: 8 cores
+- RAM: 16GB+
+- Storage: 1TB+ SSD
+- Network: 1Gbps connection
+
+PROVIDER RECOMMENDATIONS:
+- DigitalOcean ($40-80/month)
+- Linode ($40-80/month) 
+- Vultr ($30-70/month)
+- AWS/GCP (lebih mahal tapi powerful)
+
+================================================================================
+🛠 STEP 1: PERSIAPAN VPS
+================================================================================
+
+1. LOGIN KE VPS:
+   ssh root@YOUR_VPS_IP
+
+2. UPDATE SYSTEM:
+   apt update && apt upgrade -y
+
+3. INSTALL DEPENDENCIES:
+   apt install -y git curl build-essential htop unzip
+
+4. INSTALL NODE.JS 18+:
+   curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+   apt-get install -y nodejs
+   
+   # Verify installation
+   node --version
+   npm --version
+
+5. INSTALL YARN:
+   npm install -g yarn
+
+6. INSTALL DOCKER (OPTIONAL - RECOMMENDED):
+   curl -fsSL https://get.docker.com -o get-docker.sh
+   sh get-docker.sh
+   usermod -aG docker $USER
+   
+   # Logout and login again for docker group to take effect
+
+7. INSTALL PM2 (FOR PRODUCTION):
+   npm install -g pm2
+
+================================================================================
+🔧 STEP 2: CLONE & BUILD HUB
+================================================================================
+
+1. CLONE REPOSITORY:
+   cd /opt
+   git clone https://github.com/farcasterxyz/hub-monorepo.git
+   cd hub-monorepo
+
+2. INSTALL DEPENDENCIES:
+   yarn install
+   
+   # This will take 5-10 minutes
+
+3. BUILD HUB:
+   yarn build
+   
+   # This will take 10-15 minutes
+
+4. VERIFY BUILD:
+   ls -la apps/hubble/dist/
+   # Should see compiled files
+
+================================================================================
+⚙️ STEP 3: KONFIGURASI HUB
+================================================================================
+
+1. CREATE CONFIG DIRECTORY:
+   mkdir -p ~/.config/hubble
+
+2. CREATE CONFIG FILE:
+   nano ~/.config/hubble/default.config.js
+
+3. CONFIG FILE CONTENT:
+   
+   ----------------------------------------
+   module.exports = {
+     // Network configuration
+     network: 1, // 1 = mainnet, 3 = testnet
+     
+     // gRPC server config
+     rpcServerHost: "0.0.0.0", // Listen on all interfaces
+     rpcServerPort: 2283,
+     
+     // HTTP API config
+     httpServerHost: "0.0.0.0", 
+     httpServerPort: 2281,
+     
+     // P2P gossip config
+     announceIp: "YOUR_VPS_PUBLIC_IP", // GANTI DENGAN IP VPS LU!
+     gossipPort: 2282,
+     
+     // Database config
+     dbName: "farcaster_hub.db",
+     rocksDbPath: "~/.config/hubble/rocks.db",
+     
+     // Bootstrap peers (untuk initial sync)
+     bootstrapAddrs: [
+       "/dns/nemes.farcaster.xyz/tcp/2282",
+       "/dns/hoyt.farcaster.xyz/tcp/2282",
+       "/dns/lamia.farcaster.xyz/tcp/2282"
+     ],
+     
+     // Ethereum RPC endpoints (REQUIRED!)
+     l1RpcUrl: "https://eth-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY",
+     l2RpcUrl: "https://opt-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY",
+     
+     // Optional: Enable metrics
+     statsdHost: "127.0.0.1",
+     
+     // Chunk size for sync (adjust if needed)
+     chunkSize: 1000,
+     
+     // Log level
+     logLevel: "info"
+   };
+   ----------------------------------------
+
+4. GANTI PLACEHOLDERS:
+   - YOUR_VPS_PUBLIC_IP: IP public VPS lu
+   - YOUR_ALCHEMY_KEY: API key dari Alchemy
+
+================================================================================
+🔑 STEP 4: SETUP ETHEREUM RPC
+================================================================================
+
+ALCHEMY SETUP (RECOMMENDED):
+1. Daftar di https://alchemy.com/
+2. Create new app:
+   - Network: Ethereum Mainnet
+   - Name: "Farcaster Hub L1"
+3. Create another app:
+   - Network: Optimism Mainnet  
+   - Name: "Farcaster Hub L2"
+4. Copy API keys ke config file
+
+ALTERNATIVE FREE OPTIONS:
+- Infura (https://infura.io/)
+- QuickNode (https://quicknode.com/)
+- Ankr (https://ankr.com/)
+
+PUBLIC ENDPOINTS (NOT RECOMMENDED FOR PRODUCTION):
+- L1: https://eth.llamarpc.com
+- L2: https://mainnet.optimism.io
+
+================================================================================
+🔥 STEP 5: FIREWALL SETUP
+================================================================================
+
+1. SETUP UFW:
+   ufw --force enable
+   
+2. ALLOW REQUIRED PORTS:
+   ufw allow 22/tcp      # SSH
+   ufw allow 2281/tcp    # HTTP API
+   ufw allow 2282/tcp    # P2P Gossip
+   ufw allow 2283/tcp    # gRPC
+   
+3. CHECK STATUS:
+   ufw status verbose
+
+IPTABLES ALTERNATIVE:
+   iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+   iptables -A INPUT -p tcp --dport 2281 -j ACCEPT
+   iptables -A INPUT -p tcp --dport 2282 -j ACCEPT  
+   iptables -A INPUT -p tcp --dport 2283 -j ACCEPT
+   iptables-save > /etc/iptables/rules.v4
+
+================================================================================
+🚀 STEP 6: START HUB
+================================================================================
+
+DEVELOPMENT MODE (TESTING):
+1. cd /opt/hub-monorepo
+2. yarn start
+
+PRODUCTION MODE WITH PM2:
+1. CREATE PM2 ECOSYSTEM FILE:
+   nano /opt/hub-monorepo/ecosystem.config.js
+   
+   ----------------------------------------
+   module.exports = {
+     apps: [{
+       name: 'farcaster-hub',
+       script: 'yarn',
+       args: 'start',
+       cwd: '/opt/hub-monorepo',
+       env: {
+         NODE_ENV: 'production'
+       },
+       error_file: '/var/log/pm2/farcaster-hub-error.log',
+       out_file: '/var/log/pm2/farcaster-hub-out.log',
+       log_file: '/var/log/pm2/farcaster-hub.log',
+       max_restarts: 10,
+       restart_delay: 5000
+     }]
+   };
+   ----------------------------------------
+
+2. CREATE LOG DIRECTORY:
+   mkdir -p /var/log/pm2
+
+3. START WITH PM2:
+   pm2 start ecosystem.config.js
+   
+4. SAVE PM2 CONFIG:
+   pm2 save
+   
+5. SETUP AUTO-START:
+   pm2 startup
+   # Follow the instructions shown
+
+================================================================================
+🧪 STEP 7: TEST HUB CONNECTION
+================================================================================
+
+1. CHECK HUB INFO (HTTP):
+   curl http://localhost:2281/v1/info
+   
+   Expected response:
+   {
+     "version": "1.x.x",
+     "is_syncing": true,
+     "nickname": "",
+     "root_hash": "...",
+     "db_stats": {...}
+   }
+
+2. CHECK FROM EXTERNAL:
+   curl http://YOUR_VPS_IP:2281/v1/info
+
+3. TEST gRPC (requires grpcurl):
+   # Install grpcurl first
+   curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.8.7/grpcurl_1.8.7_linux_x86_64.tar.gz" | tar -xz -C /usr/local/bin
+   
+   # Test gRPC
+   grpcurl -plaintext localhost:2283 HubService/GetInfo
+
+4. CHECK SYNC STATUS:
+   curl http://localhost:2281/v1/info | jq '.is_syncing'
+   
+   # Should eventually become 'false' when fully synced
+
+================================================================================
+📊 STEP 8: MONITORING & MAINTENANCE
+================================================================================
+
+1. MONITOR LOGS:
+   pm2 logs farcaster-hub
+   
+   # Or for live logs:
+   pm2 logs farcaster-hub --lines 100 -f
+
+2. MONITOR RESOURCES:
+   htop
+   df -h
+   free -h
+
+3. CHECK DATABASE SIZE:
+   du -sh ~/.config/hubble/
+   
+4. MONITOR SYNC PROGRESS:
+   # Check if hub is still syncing
+   curl -s http://localhost:2281/v1/info | jq '.is_syncing'
+   
+   # Check database stats
+   curl -s http://localhost:2281/v1/info | jq '.db_stats'
+
+5. RESTART HUB:
+   pm2 restart farcaster-hub
+
+6. STOP HUB:
+   pm2 stop farcaster-hub
+
+================================================================================
+🔐 STEP 9: PRODUCTION HARDENING (OPTIONAL)
+================================================================================
+
+1. SETUP NGINX REVERSE PROXY:
+   apt install nginx
+   
+   nano /etc/nginx/sites-available/farcaster-hub
+   ----------------------------------------
+   server {
+       listen 80;
+       server_name yourdomain.com;
+       
+       location /v1/ {
+           proxy_pass http://localhost:2281;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+       }
+   }
+   ----------------------------------------
+   
+   ln -s /etc/nginx/sites-available/farcaster-hub /etc/nginx/sites-enabled/
+   nginx -t
+   systemctl restart nginx
+
+2. SETUP SSL WITH LET'S ENCRYPT:
+   apt install certbot python3-certbot-nginx
+   certbot --nginx -d yourdomain.com
+
+3. SETUP AUTOMATED BACKUPS:
+   crontab -e
+   
+   # Add this line for daily backup at 2 AM:
+   0 2 * * * rsync -av ~/.config/hubble/ /backup/hubble-$(date +\%Y\%m\%d)/
+
+4. SETUP LOG ROTATION:
+   nano /etc/logrotate.d/pm2
+   ----------------------------------------
+   /var/log/pm2/*.log {
+       daily
+       rotate 30
+       compress
+       delaycompress
+       missingok
+       notifempty
+       create 0644 root root
+       postrotate
+           pm2 reloadLogs
+       endscript
+   }
+   ----------------------------------------
+
+================================================================================
+🚨 TROUBLESHOOTING COMMON ISSUES
+================================================================================
+
+ISSUE: Hub tidak bisa sync
+SOLUTION: 
+- Check bootstrap peers di config
+- Verify RPC endpoints working
+- Check firewall ports 2282 (gossip)
+
+ISSUE: Out of memory
+SOLUTION:
+- Add swap space:
+  fallocate -l 4G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+ISSUE: Database corruption
+SOLUTION:
+- Stop hub: pm2 stop farcaster-hub
+- Remove db: rm -rf ~/.config/hubble/rocks.db
+- Restart hub: pm2 start farcaster-hub
+- Wait for resync (will take hours)
+
+ISSUE: High CPU usage
+SOLUTION:
+- Lower chunkSize in config
+- Check if sync is still running
+- Monitor with htop
+
+ISSUE: Network connection issues
+SOLUTION:
+- Check if ports are open: netstat -tulpn | grep :228
+- Test with telnet: telnet YOUR_IP 2283
+- Check UFW/iptables rules
+
+================================================================================
+💰 COST ESTIMATION
+================================================================================
+
+VPS COSTS (Monthly):
+- 4GB RAM / 2 CPU: $20-30
+- 8GB RAM / 4 CPU: $40-60  
+- 16GB RAM / 8 CPU: $80-120
+
+ADDITIONAL COSTS:
+- Domain (optional): $10-15/year
+- SSL Certificate: Free with Let's Encrypt
+- Ethereum RPC: Free tier usually sufficient
+
+TOTAL MONTHLY: $20-120 depending on specs
+
+BANDWIDTH USAGE:
+- Initial sync: 100-500GB
+- Ongoing: 50-200GB/month
+- Choose unlimited bandwidth plan
+
+================================================================================
+✅ FINAL STEPS
+================================================================================
+
+1. WAIT FOR FULL SYNC:
+   - Initial sync takes 4-24 hours
+   - Monitor with: curl -s http://localhost:2281/v1/info | jq '.is_syncing'
+   - When 'false', hub is ready!
+
+2. TEST YOUR HUB ENDPOINT:
+   YOUR_VPS_IP:2283 (gRPC)
+   YOUR_VPS_IP:2281 (HTTP API)
+
+3. UPDATE YOUR APP CONFIG:
+   Ganti dari Pinata ke:
+   const client = getInsecureHubRpcClient("YOUR_VPS_IP:2283");
+
+4. KASIH TAU GW ENDPOINT NYA:
+   Format: "123.45.67.89:2283" atau "yourdomain.com:2283"
+
+================================================================================
+🎉 SUCCESS INDICATORS
+================================================================================
+
+✅ Hub responds to curl http://YOUR_IP:2281/v1/info
+✅ is_syncing: false in the response
+✅ Can submit test messages via gRPC
+✅ Database size growing (sync working)
+✅ No errors in pm2 logs
+
+================================================================================
+📞 SUPPORT & NEXT STEPS
+================================================================================
+
+Kalau udah selesai setup:
+1. Test endpoint dengan curl
+2. Kasih tau gw IP:PORT nya  
+3. Gw update code untuk connect ke hub lu
+4. Test cast/fname registration
+
+Kalau ada masalah:
+1. Check pm2 logs: pm2 logs farcaster-hub
+2. Check system resources: htop, df -h
+3. Verify config file syntax
+4. Check firewall ports
+
+Good luck bro! 🚀
+
+================================================================================
